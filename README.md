@@ -20,15 +20,7 @@ This work introduces a method to **certify the comprehension of knowledge by LLM
 3. **Path Selection & Prompt Construction:** Random paths are selected from the subgraph of the pivot node to create challenging reasoning based questions.
 4. **Response Validation & Certification:** LLM responses are evaluated for correctness, and a confidence interval is calculated.
 
-![Certification Process](image.png)
-*Overview of our knowledge comprehension certifier. (a) A knowledge graph G pivoted on
-some node, in this case the ’Paul Sophus Epstein’. (b) A randomly chosen path originating at the
-pivot node from the various possibilities in G. (c) A prompt created by our prompt constructor using
-the selected path and context from the Wikidata5m corpus of the entities (nodes) involved, along
-with a distractor context and the final query. (d) The target LLM’s output to the prompt, validated
-using the response checker. (e) Certifier obtains bounds on the probability of correct response and
-we iterate till the range of the bounds falls below a threshold. (f) The final bounds contained in the
-certificate.*
+
 
 ## Getting Started
 
