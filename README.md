@@ -38,10 +38,6 @@ This work introduces a method to **certify the comprehension of knowledge by LLM
 ### Installation
 
 1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/uiuc-focal-lab/QuaCer-C.git
-   cd QuaCer-C
-   ```
 
 2. **Download Wikidata5m Filtered Data:**
 - Download the preprocessed Wikidata5m data from: LINK removed for anonymity, please see `preprocessREADME.md` for details to generate the files from Wikidata5m.
