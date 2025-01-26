@@ -128,9 +128,9 @@ def sort_vertices_by_measure(graph, k, weights):
     
     return sorted_vertices
 
-def generate_answer_options(correct_ans, distractors, path_entities, random_entities, wikidata_util,
+def generate_answer_options(correct_ans, distractors, path_entities, random_entities, wikidata_util, essential_edges,
                             min_num_options=4):
-    # assumption: distractors are ordered by decreasing distracting power
+    # assumption: distractors are ordered by decreasing distracting power, also distractors number >=1 means distractor query is True
     # assumption: path_entities is also ordered by increasing proximity to the correct answer
     #random entities: list[list[str]], 0th element: list[ents] that are from path[-1], so on
     #   A
@@ -145,8 +145,17 @@ def generate_answer_options(correct_ans, distractors, path_entities, random_enti
         options = options[:min_num_options]
         random.shuffle(options)
         return options
+    
     if len(path_entities) > 0:
-        options.extend([(path_entities[i], path_entities[i+1]) for i in range(1, len(path_entities)-1)])
+        more_options = []
+        for i in range(1, len(path_entities)-1):
+            parent_ent = path_entities[i+1]
+            pos_ent = path_entities[i]
+            if len(distractors) == 0 and wikidata_util[parent_ent][pos_ent] in essential_edges:
+                continue
+            more_options.append((pos_ent, parent_ent))
+        options.extend(more_options)
+        
     if len(options) >= min_num_options:
         options = options[:min_num_options]
         random.shuffle(options)
@@ -155,21 +164,30 @@ def generate_answer_options(correct_ans, distractors, path_entities, random_enti
 
     good_random_entities = [] # has the same relation as that connecting correct answer to its parent
 
-    for i in range(1, len(random_entities)):
-        parent_ent = path_entities[i]
-        for pos_ent in random_entities[i]:
-            if i > 0:
-                if pos_ent == path_entities[i-1]:
-                    continue
-            if wikidata_util[parent_ent][pos_ent] == rel_to_find:
-                good_random_entities.append((pos_ent, parent_ent))
-    options.extend(good_random_entities)
+    if len(distractors) > 0:
+        for i in range(2, len(random_entities)):
+            parent_ent = path_entities[i]
+            for pos_ent in random_entities[i]:
+                if i > 0:
+                    if pos_ent == path_entities[i-1]:
+                        continue
+                if wikidata_util[parent_ent][pos_ent] == rel_to_find:
+                    good_random_entities.append((pos_ent, parent_ent))
+        options.extend(good_random_entities)
+    
     num_random = 2
     random_options = []
     for i in range(1, len(random_entities)):
         parent_ent = path_entities[i]
-        pos_ents = [(ent, parent_ent) for ent in random_entities[i] if (ent, parent_ent) not in options]
-        random_options.extend(random.sample(pos_ents, min(num_random, len(pos_ents))))  
+        pos_ents = []
+        for pos_ent in random_entities[i]:
+            if len(distractors) == 0 and wikidata_util[parent_ent][pos_ent] in essential_edges:
+                continue
+            if (pos_ent, parent_ent) in options:
+                continue
+            pos_ents.append((pos_ent, parent_ent))
+        random_options.extend(random.sample(pos_ents, min(num_random, len(pos_ents))))
+    
     options.extend(random_options)
     if len(options) >= min_num_options:
         options = options[:min_num_options] #ensure correct answer is in the options as it is at index 0
@@ -177,17 +195,24 @@ def generate_answer_options(correct_ans, distractors, path_entities, random_enti
     else:
         #in case we still don't have enough options, override num_random on origin vertex to get more options
         origin_vertex = path_entities[-1]
-        pos_ents = [(ent, origin_vertex) for ent in random_entities[-1] if (ent, origin_vertex) not in options]
+        pos_ents = []
+        for pos_ent in random_entities[-1]:
+            if len(distractors) == 0 and wikidata_util[origin_vertex][pos_ent] in essential_edges:
+                continue
+            if (pos_ent, origin_vertex) in options:
+                continue
+            pos_ents.append((pos_ent, origin_vertex))
         options_needed = min(min_num_options - len(options), len(pos_ents)) #ensure we only have min_num_options options
         options.extend(random.sample(pos_ents, options_needed))
-        random.shuffle(options) 
+        random.shuffle(options)
+        
     return options
         
 
         
 
 class GraphAlgos():
-    def __init__(self, graph: dict, entity_aliases:dict, relation_aliases:dict) -> None:
+    def __init__(self, graph: dict, entity_aliases:dict, relation_aliases:dict, allow_multiple_ans=False, origin_graph=None) -> None:
         """
         Initializes the GraphAlgos object with the given graph and alias dictionaries.
 
@@ -198,6 +223,8 @@ class GraphAlgos():
         all_vertices = set(graph.keys()) | {neighbor for neighbors in graph.values() for neighbor in neighbors.keys()}
         self.graph = {vertex: graph.get(vertex, {}) for vertex in all_vertices}
         self.rel2ent_graph = {vertex: {rel:[]  for rel in neighbors.values()} for vertex, neighbors in graph.items()}
+        self.multi_ans = allow_multiple_ans
+        self.origin_graph = origin_graph
         for vertex, neighbors in self.graph.items():
             if vertex not in self.rel2ent_graph:
                 assert self.graph[vertex] == {}, f"Vertex {vertex} in graph but not in rel2ent_graph"
@@ -319,6 +346,8 @@ class GraphAlgos():
             return []
         possible_paths = []
         for neighbor in neighbors:
+            if len(possible_paths) > 100:
+                break
             possible_neighbor_paths = self.get_queries_for_relpath(rel_path[1:], neighbor)
             if len(possible_neighbor_paths) == 0:
                 continue
@@ -374,6 +403,7 @@ class GraphAlgos():
             else:
                 start = source
             path = self.dfs_path(start, path_len)
+            print(f"Path: {path}")
             #check if path in unique
             if path is not None:
                 rel_path = [self.get_relation_for_vertex(path[i], path[i+1]) for i in range(len(path)-1)]
@@ -381,8 +411,10 @@ class GraphAlgos():
                 #     path = None #answer should be unique
                 #     continue
                 possible_paths = self.get_queries_for_relpath(rel_path, start)
+                # print(f"Possible Paths: {len(possible_paths)}")
                 assert len(possible_paths) > 0, f"No possible paths found for {start} -> {path[-1]}"
-                if len(possible_paths) > 1:
+                if len(possible_paths) > 1 and not self.multi_ans:
+                    print(f" here")
                     path = None #not unique
             i += 1
         return path
@@ -608,6 +640,7 @@ def load_aliases(path):
 
 def form_context_list(query_path, wikidata_text_edge, wikidata_util, entity_top_alias):
     context_list = []
+    essential_edges = set()
     for i in range(len(query_path)-1):
         source, dest = query_path[i], query_path[i+1]
         if dest not in wikidata_text_edge[source]:
@@ -618,11 +651,12 @@ def form_context_list(query_path, wikidata_text_edge, wikidata_util, entity_top_
             relevant_text = [f"{entity_top_alias[source]} died at {entity_top_alias[dest]}"]
         else:
             relevant_text = []
+        essential_edges.add(wikidata_util[source][dest])
         relevant_text.extend(wikidata_text_edge[source][dest])
         # if type(relevant_text) == list:
         #     relevant_text = ' '.join(relevant_text)
         context_list.append(relevant_text)
-    return context_list
+    return context_list, list(essential_edges)
 
 # def simple_checker(model_answer, correct_answer, correct_answer_aliases, correct_id):
 #     """
@@ -711,13 +745,13 @@ def create_context_list(all_sents, relevant_sents_path, relevant_sents_opts, tok
     # Check each item in all_sents for inclusion
     for a_sublist in all_sents:
         for a_item in a_sublist:
-            item_tokenized_length = len(tokenizer(a_item, add_special_tokens=False))
-            if a_item in set_relevant_sents or (a_item not in seen_strings and current_length + item_tokenized_length <= max_length):
+            item_tokenized_length = len(tokenizer(a_item, add_special_tokens=False)['input_ids'])
+            if (a_item in set_relevant_sents and a_item not in seen_strings) or (a_item not in seen_strings and current_length + item_tokenized_length <= max_length):
                 to_include.add(a_item)
                 seen_strings.add(a_item)
                 if a_item not in set_relevant_sents:  # Only add to current_length if not already accounted for
                     current_length += item_tokenized_length
-
+    print("Current Length: ", current_length)
     combined_list = []
     all_sents_set = set()
     # Ensure each item is only added once
@@ -731,11 +765,23 @@ def create_context_list(all_sents, relevant_sents_path, relevant_sents_opts, tok
             combined_list.append(add_list)
     return combined_list
 
-def get_all_context(query_path, wikidata_text_sentencized):
+def get_all_context(query_path, wikidata_graph_text, wikidata_util, essential_edges, last_edge, distractor_query=False):
     all_context = []
     for entity in query_path:
-        if entity in wikidata_text_sentencized:
-            all_context.append(wikidata_text_sentencized[entity])
+        node_context = []
+        if entity not in wikidata_graph_text:
+            continue
+        for ent2, text in wikidata_graph_text[entity].items():
+            if ent2 == entity:
+                continue
+            if entity not in wikidata_util:
+                print(f"Entity {entity} not in wikidata_util")
+            if ent2 not in wikidata_util[entity]:
+                print(f"Relation {ent2} not in wikidata_util for entity {entity}")
+                print(f"text {text}")
+            if distractor_query or wikidata_util[entity][ent2] not in essential_edges or (ent2 == last_edge[0] and entity == last_edge[1]):
+                node_context.extend(text)
+        all_context.append(node_context)
     return all_context
         
 def get_random_entities(query_path, wikidata_util):
@@ -777,17 +823,16 @@ def get_query_data(graph_algos, source, id2name, graph_text_edge, graph_text_sen
         #     if random_distractor not in true_ids_path and random_distractor is not None:
         #         distractor = random_distractor
         #         node_distracted = random_distractor_parent
-        options = generate_answer_options(true_ids_path[-1], all_distractors, list(reversed(true_ids_path)), get_random_entities(list(reversed(true_ids_path)), graph_algos.graph), graph_algos.graph)
-        relevant_context_list = form_context_list(true_ids_path, graph_text_edge, graph_algos.graph, entity_top_alias=id2name)
+        relevant_context_list, essential_edges = form_context_list(true_ids_path, graph_text_edge, graph_algos.graph, entity_top_alias=id2name)
+        options = generate_answer_options(true_ids_path[-1], all_distractors, list(reversed(true_ids_path)), get_random_entities(list(reversed(true_ids_path)), graph_algos.graph), graph_algos.graph, essential_edges)
         
         relevant_options_context_list = []
         for ent, parent_ent in options:
             relevant_text = graph_text_edge[parent_ent][ent]
-            # if type(relevant_text) == list:
-            #     relevant_text = ' '.join(relevant_text)
             relevant_options_context_list.append(relevant_text)
         
-        all_context = get_all_context(true_ids_path + [ent for ent, _ in options], graph_text_sentencized)
+        graph_util = graph_algos.graph if graph_algos.origin_graph is None else graph_algos.origin_graph
+        all_context = get_all_context(true_ids_path + [ent for ent, _ in options], graph_text_edge, graph_util, essential_edges, (true_ids_path[-1], true_ids_path[-2]), distractor_query=distractor_query)
         context_list = create_context_list(all_context, relevant_context_list, relevant_options_context_list, tokenizer, max_length=max_context_length)
         if len(context_list) == 0:
             print(f"path ids true: {true_ids_path}, query: {query}, options: {options}")
@@ -799,6 +844,7 @@ def get_query_data(graph_algos, source, id2name, graph_text_edge, graph_text_sen
         if shuffle_context:
             random.shuffle(context_list)
         context = '\n'.join([' '.join(context_part) for context_part in context_list])
+        
         if id2name[true_ids_path[0]].lower() != entity_alias.lower():
             context += f" {id2name[true_ids_path[0]]} is also known as {entity_alias}."
         rel_path = [graph_algos.get_relation_for_vertex(true_ids_path[i], true_ids_path[i+1]) for i in range(len(true_ids_path)-1)]
@@ -810,6 +856,8 @@ def get_query_data(graph_algos, source, id2name, graph_text_edge, graph_text_sen
         context += f"\n{rel_context}"
         answer_options = [ent for ent, _ in options]
         random.shuffle(answer_options)
+        context_tokens = tokenizer(context, add_special_tokens=False)
+        print("context tokens length1: ", len(context_tokens['input_ids']))
         return {'query':query, 'correct_answers':[id2name[correct_id] for correct_id in correct_ids], 'path_id':true_ids_path, 
                 'path_en':path, 'context':context, 'correct_ids':correct_ids, 'distractor':distractor, 'answer_options': answer_options, 
                 'correct_ans_num': answer_options.index(true_ids_path[-1])+1}
