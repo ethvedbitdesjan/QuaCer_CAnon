@@ -79,7 +79,7 @@ follow this exact format and only choose from the given options
 
 # Start response with 'correct' or 'wrong' only and nothing else. Then explain the reasons.
 # """
-
+id2name_ = {}
 def sort_vertices_by_outdegree(graph):
     """
     Sorts the vertices in the graph based on their outdegree in descending order.
@@ -140,40 +140,40 @@ def generate_answer_options(correct_ans, distractors, path_entities, random_enti
     # C
     assert correct_ans == path_entities[0]
     options = [(correct_ans, path_entities[1])]
-    options.extend(distractors)
-    if len(options) >= min_num_options:
-        options = options[:min_num_options]
-        random.shuffle(options)
-        return options
+    # options.extend(distractors)
+    # if len(options) >= min_num_options:
+    #     options = options[:min_num_options]
+    #     random.shuffle(options)
+    #     return options
     
-    if len(path_entities) > 0:
-        more_options = []
-        for i in range(1, len(path_entities)-1):
-            parent_ent = path_entities[i+1]
-            pos_ent = path_entities[i]
-            if len(distractors) == 0 and wikidata_util[parent_ent][pos_ent] in essential_edges:
-                continue
-            more_options.append((pos_ent, parent_ent))
-        options.extend(more_options)
+    # if len(path_entities) > 0:
+    #     more_options = []
+    #     for i in range(1, len(path_entities)-1):
+    #         parent_ent = path_entities[i+1]
+    #         pos_ent = path_entities[i]
+    #         if len(distractors) == 0 and wikidata_util[parent_ent][pos_ent] in essential_edges:
+    #             continue
+    #         more_options.append((pos_ent, parent_ent))
+    #     options.extend(more_options)
         
-    if len(options) >= min_num_options:
-        options = options[:min_num_options]
-        random.shuffle(options)
-        return options
-    rel_to_find = wikidata_util[path_entities[1]][path_entities[0]]
+    # if len(options) >= min_num_options:
+    #     options = options[:min_num_options]
+    #     random.shuffle(options)
+    #     return options
+    # rel_to_find = wikidata_util[path_entities[1]][path_entities[0]]
 
-    good_random_entities = [] # has the same relation as that connecting correct answer to its parent
+    # good_random_entities = [] # has the same relation as that connecting correct answer to its parent
 
-    if len(distractors) > 0:
-        for i in range(2, len(random_entities)):
-            parent_ent = path_entities[i]
-            for pos_ent in random_entities[i]:
-                if i > 0:
-                    if pos_ent == path_entities[i-1]:
-                        continue
-                if wikidata_util[parent_ent][pos_ent] == rel_to_find:
-                    good_random_entities.append((pos_ent, parent_ent))
-        options.extend(good_random_entities)
+    # if len(distractors) > 0:
+    #     for i in range(2, len(random_entities)):
+    #         parent_ent = path_entities[i]
+    #         for pos_ent in random_entities[i]:
+    #             if i > 0:
+    #                 if pos_ent == path_entities[i-1]:
+    #                     continue
+    #             if wikidata_util[parent_ent][pos_ent] == rel_to_find:
+    #                 good_random_entities.append((pos_ent, parent_ent))
+    #     options.extend(good_random_entities)
     
     num_random = 2
     random_options = []
@@ -206,10 +206,7 @@ def generate_answer_options(correct_ans, distractors, path_entities, random_enti
         options.extend(random.sample(pos_ents, options_needed))
         random.shuffle(options)
         
-    return options
-        
-
-        
+    return options        
 
 class GraphAlgos():
     def __init__(self, graph: dict, entity_aliases:dict, relation_aliases:dict, allow_multiple_ans=False, origin_graph=None) -> None:
@@ -445,7 +442,12 @@ class GraphAlgos():
         if not do_choose:
             return all_distractors_pos
         if len(all_distractors_pos) > 0:
-            best_distractor_index = random.choices(range(len(all_distractors_pos)), weights=distractor_weights, k=1)[0]
+            if sum(distractor_weights) == 0:
+                best_distractor_index = 0
+            else:
+                best_distractor_index = random.choices(range(len(all_distractors_pos)), weights=distractor_weights, k=1)[0]
+                with open('haha.txt', 'a') as f:
+                    f.write(f"Best Distractor Index: {best_distractor_index}\n")
             # print(f"Best Distractor Weight: {distractor_weights[best_distractor_index]}")
             best_distractor = all_distractors_pos[best_distractor_index]
         if best_distractor is not None:
@@ -580,6 +582,8 @@ class MistralChecker():
         return self.checker(prompt, return_response)
 
 def get_alias(id, aliases):
+    global id2name_
+    assert id2name_ is not None and len(id2name_) > 0, "id2name_ not initialized"
     """
     Retrieves a random alias for the given ID from the provided aliases dictionary.
 
@@ -587,8 +591,9 @@ def get_alias(id, aliases):
     :param aliases: A dictionary mapping IDs to lists of aliases.
     :return: A randomly chosen alias from the list associated with the ID.
     """
-    aliases_choices = aliases[id]
-    return random.choice(aliases_choices)
+    # aliases_choices = aliases[id]
+    # return random.choice(aliases_choices)
+    return id2name_[id]
     
 def form_alias_question(question, path, entity_aliases, relation_aliases, entity_name2id, relation_name2id, graph_algos):
     """
@@ -740,7 +745,7 @@ def create_context_list(all_sents, relevant_sents_path, relevant_sents_opts, tok
     set_relevant_sents = set(flat_relevant_sents)
     to_include = set()
     current_length = total_length_relevant_sents
-    seen_strings = set(flat_relevant_sents)  # To track duplicates and included strings
+    seen_strings = set()  # To track duplicates and included strings
 
     # Check each item in all_sents for inclusion
     for a_sublist in all_sents:
@@ -767,7 +772,7 @@ def create_context_list(all_sents, relevant_sents_path, relevant_sents_opts, tok
 
 def get_all_context(query_path, wikidata_graph_text, wikidata_util, essential_edges, last_edge, distractor_query=False):
     all_context = []
-    for entity in query_path:
+    for i, entity in enumerate(query_path):
         node_context = []
         if entity not in wikidata_graph_text:
             continue
@@ -780,6 +785,8 @@ def get_all_context(query_path, wikidata_graph_text, wikidata_util, essential_ed
                 print(f"Relation {ent2} not in wikidata_util for entity {entity}")
                 print(f"text {text}")
             if distractor_query or wikidata_util[entity][ent2] not in essential_edges or (ent2 == last_edge[0] and entity == last_edge[1]):
+                node_context.extend(text)
+            elif i < len(query_path)-1 and ent2 == query_path[i+1]:
                 node_context.extend(text)
         all_context.append(node_context)
     return all_context
@@ -794,6 +801,8 @@ def get_random_entities(query_path, wikidata_util):
 
 
 def get_query_data(graph_algos, source, id2name, graph_text_edge, graph_text_sentencized, tokenizer, distractor_query=False, k=5, shuffle_context=True, max_context_length=30000):
+    global id2name_
+    id2name_ = id2name
     while True:
         distractor=None
         node_distracted=None
@@ -844,7 +853,6 @@ def get_query_data(graph_algos, source, id2name, graph_text_edge, graph_text_sen
         if shuffle_context:
             random.shuffle(context_list)
         context = '\n'.join([' '.join(context_part) for context_part in context_list])
-        
         if id2name[true_ids_path[0]].lower() != entity_alias.lower():
             context += f" {id2name[true_ids_path[0]]} is also known as {entity_alias}."
         rel_path = [graph_algos.get_relation_for_vertex(true_ids_path[i], true_ids_path[i+1]) for i in range(len(true_ids_path)-1)]
@@ -856,8 +864,6 @@ def get_query_data(graph_algos, source, id2name, graph_text_edge, graph_text_sen
         context += f"\n{rel_context}"
         answer_options = [ent for ent, _ in options]
         random.shuffle(answer_options)
-        context_tokens = tokenizer(context, add_special_tokens=False)
-        print("context tokens length1: ", len(context_tokens['input_ids']))
         return {'query':query, 'correct_answers':[id2name[correct_id] for correct_id in correct_ids], 'path_id':true_ids_path, 
                 'path_en':path, 'context':context, 'correct_ids':correct_ids, 'distractor':distractor, 'answer_options': answer_options, 
                 'correct_ans_num': answer_options.index(true_ids_path[-1])+1}
